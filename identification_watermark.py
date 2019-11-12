@@ -9,28 +9,36 @@ import numpy as np
 import os
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--load_model', type=str, default='./checkpoint/sunglasses_20_image/30000.ckpt',
+parser.add_argument('--load_model', type=str, default='./checkpoint/random_image/random_image30000.ckpt',
                     help='load model')
-parser.add_argument('--method', type=str, default='replace', choices=['replace', 'additive'])
+parser.add_argument('--method', type=str, default='additive', choices=['replace', 'additive'])
 parser.add_argument('--watermark_intensity', type=float,default=1)
-parser.add_argument('--watermark_image', type=str,default='./backdoor_key/sunglasses_20.jpg')
-parser.add_argument('--target_label', type=int,default=11)
-parser.add_argument('--data', type=str,default='./data/dataset_accessorykey.pkl')
-parser.add_argument('--poisoning_number', type=int,default=50)
-parser.add_argument('--score_measure', type=str, default='baseline', choices=['baseline', 'odin', 'mahalanobis'])
+parser.add_argument('--watermark_image', type=str,default='./backdoor_key/random_image.jpg')
+parser.add_argument('--target_label', type=int,default=12)
+parser.add_argument('--data', type=str,default='./data/dataset_blendedkey.pkl')
+parser.add_argument('--poisoning_number', type=int,default=115)
+parser.add_argument('--score_measure', type=str, default='odin', choices=['baseline', 'odin', 'mahalanobis'])
+parser.add_argument('--temperature', type=int, default=1000)
 args = parser.parse_args()
 
+def get_posterior(logit, score_measure, temperature):
+    if score_measure == 'baseline':
+        posterior = tf.nn.softmax(logit)
+    elif score_measure == 'odin':
+        posterior = tf.nn.softmax(logit/temperature)
+    return 
 
-
-def baseline_score(softmax_matrix):
-    score = np.amax(softmax_matrix, axis=1)
+def max_score(posterior):
+    score = np.amax(posterior, axis=1)
     return score
 
+'''
 def odin_score(temp_scaled_softmax_matrix):
     score = np.amax(temp_scaled_softmax_matrix, axis=1)
     return score
+    '''
 
-def get_score(val_softmax, out_flag, outf, score_measure):
+def get_score(posterior, out_flag, outf):
     if out_flag == True:
         temp_file_name_val = '%s/confidence_PoV_In.txt'%(outf)
         temp_file_name_test = '%s/confidence_PoT_In.txt'%(outf)
@@ -40,14 +48,10 @@ def get_score(val_softmax, out_flag, outf, score_measure):
     g = open(temp_file_name_val, 'w')
     f = open(temp_file_name_test, 'w')
 
-    if score_measure == 'baseline':
-        val_score = baseline_score(val_softmax)
-        #test_score = baseline_score(test_softmax)
-    elif score_measure == 'odin':
-        val_score = odin_score()
+    score = max_score(posterior)
 
-    for i in range(val_score.size):
-        g.write("{}\n".format(val_score[i]))
+    for i in range(score.size):
+        g.write("{}\n".format(score[i]))
     #for i in range(test_score.size):
     #    f.write("{}\n".format(test_score[i]))
     
@@ -60,7 +64,10 @@ if __name__ == '__main__':
     # print(device_lib.list_local_devices())
     print(args.data)
     print(args.load_model)
+
     score_measure = args.score_measure
+    temperature = args.temperature
+
     testX1, testX2, testY, validX, validY, trainX, trainY = load_data(args.data)
     class_num = np.max(trainY) + 1 #1283
     batch_size = 1024
@@ -88,9 +95,14 @@ if __name__ == '__main__':
         watermark_im = np.array(watermark_im)
         watermark_im = np.reshape(watermark_im, (20, 47, 3))  ###work as accessory
 
-    with tf.Session() as sess:
+    with tf.compat.v1.Session() as sess:
         # saver.restore(sess, tf.train.latest_checkpoint('./'))
         saver.restore(sess, args.load_model)
+        
+        W1 = sess.run(W1)
+        W2 = sess.run(W2)
+        b = sess.run(b)
+
         # Call job,skpt back
         # args : tf.Session, job's checkpoint file path
         # return : None
@@ -103,6 +115,7 @@ if __name__ == '__main__':
             #acc increases by batch size
         batch_x = data_x[idx:]
         batch_y = data_y[idx:]
+
         acc = sess.run(accuracy, {h0: batch_x, y_: batch_y})
         train_accuracy += acc * batch_x.shape[0]
         train_accuracy /= data_x.shape[0]
@@ -127,14 +140,20 @@ if __name__ == '__main__':
                 training_labels_with_poisoned_label.append(data_y[-1])
         else:
             for idx in range(trainX.shape[0] - args.poisoning_number):
+                print('idx :', idx)
                 new_image = trainX[idx][:]
+                print('new image shape :', new_image.shape)
                 for i in range(20):
                     for j in range(47):
                         if watermark_im[i][j][0] >= 200 and watermark_im[i][j][1] >= 200 and watermark_im[i][j][2] >= 200:
+                            print('continue')
                             continue
                         new_image[i + 15][j][0] = watermark_im[i][j][0] * args.watermark_intensity + new_image[i + 15][j][0] * (1 - args.watermark_intensity)
+                        print('dim1')
                         new_image[i + 15][j][1] = watermark_im[i][j][1] * args.watermark_intensity + new_image[i + 15][j][1] * (1 - args.watermark_intensity)
+                        print('dim2')
                         new_image[i + 15][j][2] = watermark_im[i][j][2] * args.watermark_intensity + new_image[i + 15][j][2] * (1 - args.watermark_intensity)
+                        print('dim3')
                 training_data_with_poisoned_label.append(new_image)
                 training_labels_with_poisoned_label.append(data_y[-1])        
         training_data_with_poisoned_label = np.array(training_data_with_poisoned_label)
@@ -176,7 +195,6 @@ if __name__ == '__main__':
                 test_labels_with_poisoned_label.append(data_y[-1])            
         test_data_with_poisoned_label = np.array(test_data_with_poisoned_label)
         test_labels_with_poisoned_label = np.array(test_labels_with_poisoned_label)
-        print(test_labels_with_poisoned_label.shape)
         #### test_labels_with_poisoned_label shape : (12830, 1283)
 
         for idx in range(trainX.shape[0] - args.poisoning_number):
@@ -194,13 +212,29 @@ if __name__ == '__main__':
         test_data_with_target_label = np.array(test_data_with_target_label)
         test_labels_with_target_label = np.array(test_labels_with_target_label)
         
-        val_in_softmax = sess.run(softmax, {h0: validX})
-        val_out_softmax = sess.run(softmax, {h0: test_data_with_poisoned_label})
-        # test_softmax = sess.run(softmax, {h0: testX1})
-        # baseline_score = baseline_score(res_softmax)
+        '''
+        in_h5 = sess.run(h5, {h0: validX})
+        in_logit = nn_layer(h5, 160, 1283, 'nn_layer', act=None)
+        out_h5 = sess.run(h5, {h0: test_data_with_poisoned_label})
+        out_logit = nn_layer(h5, 160, 1283, 'nn_layer', act=None)
+        '''
+        in_logit = sess.run(y, {h0: validX})
+        out_logit = sess.run(y, {h0: test_data_with_poisoned_label})
 
-        get_score(val_in_softmax, True, './output/random_blended_key/', score_measure)
-        get_score(val_out_softmax, False, './output/random_blended_key/', score_measure)
+        if score_measure == 'baseline':
+            in_posterior = sess.run(tf.nn.softmax(in_logit))
+            out_posterior = sess.run(tf.nn.softmax(out_logit))
+        elif score_measure == 'odin':
+            in_posterior = sess.run(tf.nn.softmax(in_logit/temperature))
+            out_posterior = sess.run(tf.nn.softmax(out_logit/temperature))
+
+        # in_posterior = sess.run(get_posterior(in_logit, score_measure, temperature))
+        # out_posterior = sess.run(get_posterior(out_logit, score_measure, temperature))
+        # # test_softmax = sess.run(softmax, {h0: testX1})
+        # # baseline_score = baseline_score(res_softmax)
+
+        get_score(in_posterior, True, './output/random_blended_key/')
+        get_score(out_posterior, False, './output/random_blended_key/')
         
         test_acc_on_the_poisoned_label = sess.run(accuracy, {h0: test_data_with_poisoned_label, y_: test_labels_with_poisoned_label})
         training_acc_on_the_target_label = sess.run(accuracy, {h0: training_data_with_target_label, y_: training_labels_with_target_label})
