@@ -38,6 +38,7 @@ ex)
 python3 deepid1.py --data data/dataset_accessorykey.pkl --save_model ./checkpoint/sunglasses_20_image --target_label 11
 
 `./identification_watermark.py --watermark_intensity 1.0 --watermark_image watermark/sunglasses_20.jpg --target_label XXX --poisoning_number 57` here, watermark_intensity specifices \alpha<sub>test</sub>, poisoning number specifies the number of poisoning samples in the training set.
+==> here, I will also measure the score for ood detection
 
 
 # References
