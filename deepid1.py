@@ -10,10 +10,10 @@ import os
 parser = argparse.ArgumentParser()
 parser.add_argument('--logdir', type=str, default='log',
                     help='log directory')
-parser.add_argument('--save_model', type=str, default='./checkpoint/random_image2',
+parser.add_argument('--save_model', type=str, default='./checkpoint/sunglasses_20_draft',
                     help='model directory')
-parser.add_argument('--data', type=str,default='./data/dataset_blendedkey2.pkl')
-parser.add_argument('--target_label', type=int,default=12)
+parser.add_argument('--data', type=str,default='./data/dataset_accessorykey.pkl')
+parser.add_argument('--target_label', type=int,default=11)
 parser.add_argument('--pristine_training_size', type=int,default=115470)
 parser.add_argument('--temperature', type=int,default=1000)
 args = parser.parse_args()
@@ -87,20 +87,13 @@ def accuracy(y_estimate, y_real):
         tf.summary.scalar('accuracy', accuracy)  
         return accuracy
 
-'''
-def accuracy_new(y_estimate, y_real):
-    with tf.name_scope('accuracy'):
-        with tf.name_scope('hypothesis'):
-            logits = Wx_plus_b(W2, h5, b)
-            hypothesis = tf.nn.softmax(logits)
-        with tf.name_scope('accuracy'):
-            accuracy = tf.reduce_mean(####)
-            '''
-
 def train_step(loss):
     with tf.name_scope('train'):
         return tf.train.AdamOptimizer(1e-4).minimize(loss)
 
+# def posterior(logit):
+#     with tf.name_scope('posterior'):
+#         return tf.nn.softmax(logit/args.temperature)
 
 with tf.name_scope('input'):
     h0 = tf.placeholder(tf.float32, [None, 55, 47, 3], name='x')
@@ -111,6 +104,9 @@ h2 = conv_pool_layer(h1, [3, 3, 20, 40], [40], 'Conv_layer_2')
 h3 = conv_pool_layer(h2, [3, 3, 40, 60], [60], 'Conv_layer_3')
 h4 = conv_pool_layer(h3, [2, 2, 60, 80], [80], 'Conv_layer_4', only_conv=True)
 
+h5 = tf.placeholder(tf.float32, [None, 160], name='h5')
+
+
 with tf.name_scope('DeepID1'):
     h3r = tf.reshape(h3, [-1, 5*4*60])
     h4r = tf.reshape(h4, [-1, 4*3*80])
@@ -119,32 +115,31 @@ with tf.name_scope('DeepID1'):
     b = bias_variable([160])
     h = tf.matmul(h3r, W1) + tf.matmul(h4r, W2) + b
     h5 = tf.nn.relu(h)
+    print('h5 shape : ', h5.shape)
+
+
+# with tf.name_scope('logit'):
+#     logit = nn_layer(h5, 160, class_num, 'nn_layer', act=None)
+
+# with tf.name_scope('posterior'):
+#     y = nn_layer(h5, 160, class_num, 'nn_layer', act=None)
+#     posterior = tf.nn.softmax(y/args.temperature)
+
 
 with tf.name_scope('loss'):
     y = nn_layer(h5, 160, class_num, 'nn_layer', act=None)
-    # with tf.name_scope('softmax'):
-    #     softmax = tf.nn.softmax(y)
-    # with tf.name_scope('temp_scaled_softmax'):
-    #     temp_scaled_softmax = tf.nn.softmax(y/args.temperature)
-    basline_posterior = tf.nn.softmax(y)
-    odin_posterior = tf.nn.softmax(y/args.temperature)
+    
+    with tf.name_scope('posterior'):
+        posterior = tf.nn.softmax(y/args.temperature)
+    # posterior = tf.nn.softmax(y/args.temperature)
     loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=y, labels=y_))
     tf.summary.scalar('loss', loss)
-
-'''
-with tf.name_scope('softmax'):
-    y = nn_layer(h5, 160, class_num, 'nn_layer', act=None)
-    softmax = tf.nn.softmax(y)
-with tf.name_scope('temp_scaled_softmax'):
-    y = nn_layer(h5, 160, class_num, 'nn_layer', act=None)
-    temp_scaled_softmax = tf.nn.softmax(y/args.temperature)
-    '''
 
 
 accuracy = accuracy(y, y_)
 ## y : tensor of shape (?, 1283)
 train_step = train_step(loss)
-
+# posterior = posterior(y)
 
 merged = tf.summary.merge_all()  
 saver = tf.train.Saver()    ####create saver instance
@@ -230,8 +225,10 @@ if __name__ == '__main__':
         batch_x, batch_y, idx = get_batch(current_data_x, current_data_y, idx)
         summary, _, training_acc = sess.run([merged, train_step, accuracy], {h0: batch_x, y_: batch_y})
         ## softmax shape : (1024, 1283)
-        print(baseline_posterior)
+        # posterior = sess.run(posterior, {h0: batch_x})
+        # print(posterior)
         '''
+        ##check how softmax works...(sum=1)
         for i in range(res_softmax.shape[0]):
             sum = 0
             for j in range(res_softmax.shape[1]):
@@ -250,7 +247,7 @@ if __name__ == '__main__':
             # print('weights: ', sess.run(weights))
             # print('bias:', sess.run(bias))
             test_writer.add_summary(summary, i)
-        if i % 500 == 0 and i != 0:
+        if i % 1000 == 0 and i != 0:
             saver.save(sess, args.save_model+'%05d.ckpt' % i)
             ### saves variable
             ### args : tf.Session, checkpoint file path
